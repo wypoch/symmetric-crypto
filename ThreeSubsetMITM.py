@@ -69,6 +69,7 @@ class ThreeSubsetMITM:
         ]
 
         output_depends_on = [set() for _ in range(self.num_block_units)]
+        base_key = randrange(2**self.key_size)
 
         # i is the index of the key unit we change
         for i in range(self.num_key_units):
@@ -76,9 +77,9 @@ class ThreeSubsetMITM:
             for j in range(self.unit_values):
                 
                 if decrypt:
-                    output = self.cipher.decrypt(word, j << unit_size*i, rounds, from_round=self.num_rounds)
+                    output = self.cipher.decrypt(word, base_key ^ (j << unit_size*i), rounds, from_round=self.num_rounds)
                 else:
-                    output = self.cipher.encrypt(word, j << unit_size*i, rounds)
+                    output = self.cipher.encrypt(word, base_key ^ (j << unit_size*i), rounds)
                     
                 # k is the index of the output unit
                 for k in range(self.num_block_units):
@@ -92,7 +93,7 @@ class ThreeSubsetMITM:
             
         return output_depends_on
     
-    def get_dependencies(self, rounds, decrypt=False, num_samples=1):
+    def get_dependencies(self, rounds, decrypt=False, num_samples=10):
         """We determine which key units affect each output unit. This function uses the following fundamental procedure:
         
         Fix a word to encrypt. for a given key unit, we try all possible values, and record which output units fluctuate.
@@ -102,13 +103,13 @@ class ThreeSubsetMITM:
         
         Returns: a list of sets, each containing key units affecting the output unit of that index.
         """
-        overall_deps = [set([_ for _ in range(self.num_key_units)]) for _ in range(self.num_block_units)]
+        overall_deps = [set() for _ in range(self.num_block_units)]
         
         for _ in range(num_samples):
             word = randrange(2**self.block_size)
             deps = self.get_dependencies_helper(word, self.unit_size, rounds, decrypt)
             for k in range(self.num_block_units):
-                overall_deps[k] &= deps[k]
+                overall_deps[k] |= deps[k]
                 
         return overall_deps
 
@@ -133,7 +134,7 @@ class ThreeSubsetMITM:
         for rounds in range(self.num_rounds + 1):
             enc_deps.append(self.get_dependencies(rounds))
             dec_deps.append(self.get_dependencies(rounds, decrypt=True))
-        
+                    
         known_key_units = set()
         argmin_nonzero = lambda vals: min((i for i,v in enumerate(vals) if v != 0), key=lambda i: vals[i])
         schedule = list()
@@ -186,7 +187,8 @@ class ThreeSubsetMITM:
             for i, phase in enumerate(schedule):
                 logging.info(f"Phase {i}: encrypt {phase["enc_r"]} rounds, decrypt {phase["dec_r"]} rounds," +
                     f" matching on unit {phase["match_index"]}, (|K_enc|, |K_dec|, |K_c|) = " +
-                    f"{len(phase["K_enc"]), len(phase["K_dec"]), len(phase["K_c"])}")
+                    f"{len(phase["K_enc"]), len(phase["K_dec"]), len(phase["K_c"])}, " +\
+                    f"units recovered: {phase["K_enc"]} + {phase["K_dec"]} + {phase["K_c"]}")
             
         return schedule
     
